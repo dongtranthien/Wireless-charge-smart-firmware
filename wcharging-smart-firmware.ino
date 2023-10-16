@@ -14,7 +14,8 @@ const char *mqtt_password = "";// password for authentication
 const int mqtt_port = 8883;// port of MQTT over TLS/SSL
 
 // load DigiCert Global Root CA ca_cert
-const char* ca_cert= "";
+const char* ca_cert= \
+"";
 
 // init secure wifi client
 WiFiClientSecure espClient;
@@ -28,6 +29,8 @@ void connectMqtt() {
     // connecting to a mqtt broker
     client.setServer(mqtt_broker, mqtt_port);
     client.setCallback(callback);
+
+    int indexConnectMqtt = 0;
     while (!client.connected()) {
         String client_id = "esp32-client-";
         client_id += String(WiFi.macAddress());
@@ -40,9 +43,14 @@ void connectMqtt() {
             Serial.println("Retrying in 5 seconds.");
             delay(5000);
         }
+        
+        indexConnectMqtt++;
+        if(indexConnectMqtt > 20){
+          ESP.restart();
+        }
     }
     // publish and subscribe
-    client.publish(topic, "Hi EMQX I'm ESP32 ^^");
+    client.publish(topic, "Hi, I'm wcharging smart");
     client.subscribe(topic);
 }
 
@@ -54,10 +62,16 @@ void setup() {
     digitalWrite(8, HIGH);
     // connecting to a WiFi network
     WiFi.begin(ssid, password);
+    int indexConnectWifi = 0;
     while (WiFi.status() != WL_CONNECTED) {
         digitalWrite(8, !digitalRead(8));
         delay(500);
         Serial.println("Connecting to WiFi..");
+
+        indexConnectWifi++;
+        if(indexConnectWifi > 60){
+          ESP.restart();
+        }
     }
     Serial.println("Connected to the WiFi network");
     digitalWrite(8, LOW);
@@ -80,7 +94,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     if(payload[0] == '1'){
       digitalWrite(10, HIGH);
     }
-    else{
+    else if(payload[0] == '0'){
       digitalWrite(10, LOW);
     }
     
@@ -89,6 +103,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
 }
 
 void reconnect() {
+  int indexReconnectMqtt = 0;
   while (!client.connected()) {
     Serial.println("Reconnecting to MQTT broker...");
     String client_id = "esp32-client-";
@@ -102,13 +117,37 @@ void reconnect() {
         Serial.println("Retrying in 5 seconds.");
         delay(5000);
     }
+
+    indexReconnectMqtt++;
+    if(indexReconnectMqtt > 20){
+      ESP.restart();
+    }
   }
 }
 
 void loop() {
-  if (!client.connected()) {
-    Serial.print("Client connected");
-  }
-  client.loop();
-  delay(1);
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("WiFi connection lost, attempting to reconnect...");
+        WiFi.begin(ssid, password);
+
+        int indexReconnectWifi = 0;
+        while (WiFi.status() != WL_CONNECTED) {
+            delay(500);
+            Serial.println("Reconnecting to WiFi...");
+
+            indexReconnectWifi++;
+            if(indexReconnectWifi > 20){
+              ESP.restart();
+            }
+        }
+        Serial.println("WiFi reconnected.");
+    }
+
+    if (!client.connected()) {
+        Serial.println("MQTT client connection lost, attempting to reconnect...");
+        connectMqtt();
+    }
+
+    client.loop();
+    delay(1);
 }
