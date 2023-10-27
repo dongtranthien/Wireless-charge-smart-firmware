@@ -1,6 +1,9 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <WiFiClientSecure.h>
+#include <Preferences.h>
+
+Preferences preferences;
 
 // WiFi
 const char* ssid = "";
@@ -21,6 +24,11 @@ const char* ca_cert= \
 WiFiClientSecure espClient;
 // use wifi client to init mqtt client
 PubSubClient client(espClient); 
+String client_id = "device-client-";
+String topicSend = "device-response-";
+unsigned long timeBefore;
+unsigned int rstCounter = 0;
+unsigned long timePeriodToPublishMqtt = 3000;
 
 
 void connectMqtt() {
@@ -32,8 +40,6 @@ void connectMqtt() {
 
     int indexConnectMqtt = 0;
     while (!client.connected()) {
-        String client_id = "esp32-client-";
-        client_id += String(WiFi.macAddress());
         Serial.printf("The client %s connects to the public mqtt broker\n", client_id.c_str());
         if (client.connect(client_id.c_str(), mqtt_username, mqtt_password)) {
             Serial.println("Public emqx mqtt broker connected");
@@ -50,7 +56,7 @@ void connectMqtt() {
         }
     }
     // publish and subscribe
-    client.publish(topic, "Hi, I'm wcharging smart");
+    client.publish(topic, client_id.c_str());
     client.subscribe(topic);
 }
 
@@ -60,6 +66,16 @@ void setup() {
     pinMode(8, OUTPUT);
     pinMode(10, OUTPUT);
     digitalWrite(8, HIGH);
+    // Init preferences to update reset counter
+    preferences.begin("my-app", false);
+    // Get reset counter and update
+    rstCounter = preferences.getUInt("rst-cnt", 0);
+    rstCounter++;
+    preferences.putUInt("rst-cnt", rstCounter);
+    preferences.end();
+    // Init client id
+    client_id += String(WiFi.macAddress());
+    topicSend += String(WiFi.macAddress());
     // connecting to a WiFi network
     WiFi.begin(ssid, password);
     int indexConnectWifi = 0;
@@ -82,15 +98,19 @@ void setup() {
     digitalWrite(8, HIGH);
     delay(1000);
     digitalWrite(8, LOW);
+
+    timeBefore = millis();
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
+    timePeriodToPublishMqtt = 10000;
     Serial.print("Message arrived in topic: ");
     Serial.println(topic);
     Serial.print("Message:");
     for (int i = 0; i < length; i++) {
         Serial.print((char) payload[i]);
     }
+    
     if(payload[0] == '1'){
       digitalWrite(10, HIGH);
     }
@@ -150,4 +170,21 @@ void loop() {
 
     client.loop();
     delay(1);
+
+    unsigned long currentTime = millis();
+    unsigned long deltaTime = 0;
+    if(currentTime >= timeBefore){
+      deltaTime = currentTime - timeBefore;
+    }
+    else{
+      deltaTime = 4294967295 - timeBefore + currentTime;
+    }
+    if(deltaTime >= timePeriodToPublishMqtt){
+      timeBefore = currentTime;
+      if(client.connected()){
+        String messageSend = "ok-";
+        messageSend += rstCounter;
+        client.publish(topicSend.c_str(), messageSend.c_str());
+      }
+    }
 }
